@@ -11,6 +11,7 @@ class ScanOrchestrator(context: Context) {
 
     private val portScanner = PortScanner()
     private val socks5Probe = Socks5Probe()
+    private val authProbe = AuthProbe()
     private val exitIPResolver = ExitIPResolver()
     private val xrayAPIDetector = XrayAPIDetector()
     private val deviceInfoCollector = DeviceInfoCollector(context)
@@ -95,7 +96,45 @@ class ScanOrchestrator(context: Context) {
             ))
         }
 
-        // Фаза 5: Получение выходного IP через уязвимые прокси
+        // Фаза 5: Проверка аутентификации + попытка перехвата
+        onPhase(ScanPhase.AUTH_PROBE)
+        val socksProxies = proxies.filter {
+            it.type == ProxyType.SOCKS5_NO_AUTH || it.type == ProxyType.SOCKS5_AUTH_REQUIRED
+        }
+        val authResults = socksProxies.map { proxy -> authProbe.probe(proxy.port) }
+
+        authResults.forEach { auth ->
+            if (auth.bruteForceSuccess == true) {
+                findings.add(Finding(
+                    Severity.CRITICAL,
+                    "🔑 Слабый пароль подобран на порту ${auth.port}!",
+                    "Credentials: ${auth.bruteForceCredentials}\nМетод: ${auth.methodName}",
+                    mapOf("Порт" to auth.port.toString(), "Пароль" to (auth.bruteForceCredentials ?: ""))
+                ))
+            }
+            if (auth.udpBypassPossible) {
+                findings.add(Finding(
+                    Severity.WARNING,
+                    "UDP bypass возможен на порту ${auth.port}",
+                    "UDP ASSOCIATE работает без per-packet auth (RFC 1928 Section 7)"
+                ))
+            }
+            auth.sniffAttempt?.let { sniff ->
+                findings.add(Finding(
+                    if (sniff.rawSocketBlocked) Severity.SAFE else Severity.CRITICAL,
+                    if (sniff.rawSocketBlocked) "🛡️ Перехват пароля невозможен (порт ${auth.port})"
+                    else "⚠️ Raw socket доступен — возможен перехват!",
+                    sniff.conclusion,
+                    buildMap {
+                        put("Raw socket заблокирован", if (sniff.rawSocketBlocked) "Да ✅" else "Нет ❌")
+                        put("/proc/net/tcp виден", if (sniff.procNetTcpVisible) "Да (метаданные)" else "Нет")
+                        put("UDP sniff", sniff.udpSniffResult)
+                    }
+                ))
+            }
+        }
+
+        // Фаза 6: Получение выходного IP через уязвимые прокси
         onPhase(ScanPhase.EXIT_IP)
         val exitIPs = mutableListOf<ExitIPInfo>()
         val vulnerableSocks = proxies.filter { it.type == ProxyType.SOCKS5_NO_AUTH }
@@ -151,6 +190,7 @@ class ScanOrchestrator(context: Context) {
             proxies = proxies,
             exitIPs = exitIPsWithGeo,
             xrayAPI = xrayApi,
+            authProbes = authResults,
             findings = findings
         )
     }

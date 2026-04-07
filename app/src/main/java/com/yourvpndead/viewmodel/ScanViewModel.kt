@@ -146,6 +146,26 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 appendLine()
             }
 
+            if (result.authProbes.isNotEmpty()) {
+                appendLine("── Auth Analysis ──")
+                result.authProbes.forEach { auth ->
+                    appendLine("  Port ${auth.port}: method=${auth.methodName}")
+                    appendLine("    Auth required: ${auth.authRequired}")
+                    if (auth.bruteForceSuccess == true) {
+                        appendLine("    ⚠️ WEAK PASSWORD: ${auth.bruteForceCredentials}")
+                    }
+                    if (auth.udpBypassPossible) {
+                        appendLine("    ⚠️ UDP bypass possible (no per-packet auth)")
+                    }
+                    auth.sniffAttempt?.let { sniff ->
+                        appendLine("    Raw socket blocked: ${sniff.rawSocketBlocked}")
+                        appendLine("    /proc/net/tcp visible: ${sniff.procNetTcpVisible}")
+                        appendLine("    Conclusion: ${sniff.conclusion}")
+                    }
+                }
+                appendLine()
+            }
+
             appendLine("── Findings: ${result.findings.size} ──")
             result.findings.forEach { finding ->
                 appendLine("  [${finding.severity.emoji} ${finding.severity.label}] ${finding.title}")

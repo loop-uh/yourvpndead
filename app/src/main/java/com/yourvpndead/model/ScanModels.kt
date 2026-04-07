@@ -90,6 +90,36 @@ data class Finding(
     val details: Map<String, String> = emptyMap()
 )
 
+/** Результат проверки аутентификации */
+data class AuthProbeResult(
+    val port: Int,
+    val supportsNoAuth: Boolean = false,
+    val supportsPassword: Boolean = false,
+    val authRequired: Boolean = false,
+    val selectedMethod: Int = -1,
+    val bruteForceSuccess: Boolean? = null,
+    val bruteForceCredentials: String? = null,
+    val udpBypassPossible: Boolean = false,
+    val sniffAttempt: SniffAttempt? = null
+) {
+    val methodName: String get() = when (selectedMethod) {
+        0x00 -> "NO AUTH (0x00)"
+        0x01 -> "GSSAPI (0x01)"
+        0x02 -> "PASSWORD (0x02)"
+        0xFF -> "REJECTED (0xFF)"
+        else -> "UNKNOWN (0x${selectedMethod.toString(16)})"
+    }
+}
+
+/** Результат попытки перехвата трафика */
+data class SniffAttempt(
+    val rawSocketBlocked: Boolean = true,
+    val procNetTcpVisible: Boolean = false,
+    val procNetTcpData: String? = null,
+    val udpSniffResult: String = "",
+    val conclusion: String = ""
+)
+
 /** Полный результат скана */
 data class ScanResult(
     val timestamp: Long = System.currentTimeMillis(),
@@ -98,6 +128,7 @@ data class ScanResult(
     val proxies: List<ProxyInfo> = emptyList(),
     val exitIPs: List<ExitIPInfo> = emptyList(),
     val xrayAPI: XrayAPIInfo? = null,
+    val authProbes: List<AuthProbeResult> = emptyList(),
     val findings: List<Finding> = emptyList()
 ) {
     val vulnerableCount: Int get() = proxies.count { it.vulnerable }
@@ -111,6 +142,7 @@ enum class ScanPhase(val label: String) {
     PORT_SCAN("Сканирование портов..."),
     PROXY_PROBE("Определение типов прокси..."),
     API_DETECT("Поиск xray API..."),
+    AUTH_PROBE("Проверка аутентификации и попытка перехвата..."),
     EXIT_IP("Получение выходного IP..."),
     GEO_LOOKUP("Геолокация IP..."),
     DONE("Скан завершён");
