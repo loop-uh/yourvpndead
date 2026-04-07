@@ -23,13 +23,26 @@ class ScanOrchestrator(context: Context) {
     private val indirectSignsChecker = IndirectSignsChecker(context)
 
     /**
-     * Быстрый скан — только известные порты.
-     * @param onPhase колбэк смены фазы скана
-     * @param onProgress колбэк прогресса (0.0 - 1.0)
+     * Быстрый скан — только известные порты (~40 портов).
      */
     suspend fun quickScan(
         onPhase: (ScanPhase) -> Unit = {},
         onProgress: (Float) -> Unit = {}
+    ): ScanResult = doScan(fullRange = false, onPhase = onPhase, onProgress = onProgress)
+
+    /**
+     * Полный скан — все 65535 портов.
+     * Все остальные проверки идентичны быстрому скану.
+     */
+    suspend fun fullScan(
+        onPhase: (ScanPhase) -> Unit = {},
+        onProgress: (Float) -> Unit = {}
+    ): ScanResult = doScan(fullRange = true, onPhase = onPhase, onProgress = onProgress)
+
+    private suspend fun doScan(
+        fullRange: Boolean,
+        onPhase: (ScanPhase) -> Unit,
+        onProgress: (Float) -> Unit
     ): ScanResult {
         val findings = mutableListOf<Finding>()
 
@@ -311,12 +324,17 @@ class ScanOrchestrator(context: Context) {
 
         // Фаза 2: Скан портов
         onPhase(ScanPhase.PORT_SCAN)
-        val openPorts = portScanner.scanKnownPorts { onProgress(0.1f + it * 0.3f) }
+        val openPorts = if (fullRange) {
+            portScanner.scanFullRange { onProgress(0.1f + it * 0.3f) }
+        } else {
+            portScanner.scanKnownPorts { onProgress(0.1f + it * 0.3f) }
+        }
 
         if (openPorts.isEmpty()) {
             findings.add(Finding(
                 Severity.SAFE, "Открытых прокси-портов не найдено",
-                "Ни один из ${PortScanner.KNOWN_PORTS.size} известных портов не открыт на localhost"
+                if (fullRange) "Ни один из 65535 портов не открыт на localhost"
+                else "Ни один из ${PortScanner.KNOWN_PORTS.size} известных портов не открыт на localhost"
             ))
             return ScanResult(device = device, openPorts = openPorts, directSigns = directSigns, indirectSigns = indirectSigns, findings = findings)
         }
@@ -497,80 +515,4 @@ class ScanOrchestrator(context: Context) {
         )
     }
 
-    /** Полный скан (все 65535 портов) */
-    suspend fun fullScan(
-        onPhase: (ScanPhase) -> Unit = {},
-        onProgress: (Float) -> Unit = {}
-    ): ScanResult {
-        onPhase(ScanPhase.DEVICE_INFO)
-        val device = deviceInfoCollector.collect()
-        val directSigns = directSignsChecker.fullCheck()
-        val indirectSigns = indirectSignsChecker.fullCheck()
-
-        onPhase(ScanPhase.PORT_SCAN)
-        val openPorts = portScanner.scanFullRange { onProgress(it * 0.5f) }
-
-        // Далее — аналогично quickScan но с полным списком портов
-        onPhase(ScanPhase.PROXY_PROBE)
-        val proxies = openPorts.mapIndexed { idx, port ->
-            onProgress(0.5f + (idx.toFloat() / maxOf(openPorts.size, 1)) * 0.2f)
-            socks5Probe.probe(port.port)
-        }
-
-        onPhase(ScanPhase.API_DETECT)
-        onProgress(0.75f)
-        val xrayApi = xrayAPIDetector.detect()
-
-        onPhase(ScanPhase.EXIT_IP)
-        val exitIPs = mutableListOf<ExitIPInfo>()
-        proxies.filter { it.type == ProxyType.SOCKS5_NO_AUTH }.forEach { proxy ->
-            exitIPResolver.resolve(proxy.port)?.let { exitIPs.add(it) }
-        }
-
-        onPhase(ScanPhase.GEO_LOOKUP)
-        onProgress(0.9f)
-        val exitIPsWithGeo = exitIPs.map { it.copy(geo = geoLocator.locate(it.ip)) }
-
-        onPhase(ScanPhase.DONE)
-        onProgress(1f)
-
-        // Findings генерируются аналогично quickScan
-        val findings = buildFindings(device, openPorts, proxies, xrayApi, exitIPsWithGeo)
-        return ScanResult(device = device, openPorts = openPorts, proxies = proxies,
-            directSigns = directSigns, indirectSigns = indirectSigns, exitIPs = exitIPsWithGeo, xrayAPI = xrayApi, findings = findings)
-    }
-
-    private fun buildFindings(
-        device: DeviceFingerprint,
-        openPorts: List<OpenPort>,
-        proxies: List<ProxyInfo>,
-        xrayApi: XrayAPIInfo?,
-        exitIPs: List<ExitIPInfo>
-    ): List<Finding> {
-        val findings = mutableListOf<Finding>()
-
-        if (device.isVpnActive) {
-            findings.add(Finding(Severity.INFO, "VPN активен", "TRANSPORT_VPN обнаружен"))
-        }
-
-        if (openPorts.isEmpty()) {
-            findings.add(Finding(Severity.SAFE, "Открытых портов не найдено", "Устройство защищено"))
-            return findings
-        }
-
-        proxies.filter { it.vulnerable }.forEach {
-            findings.add(Finding(Severity.CRITICAL, "${it.type.label} на :${it.port}", it.details))
-        }
-
-        if (xrayApi != null) {
-            findings.add(Finding(Severity.CRITICAL, "xray API на :${xrayApi.port}", xrayApi.details))
-        }
-
-        exitIPs.forEach { exitIP ->
-            val desc = exitIP.geo?.let { "Страна: ${it.country}, ${it.city}, ISP: ${it.isp}" } ?: ""
-            findings.add(Finding(Severity.CRITICAL, "Exit IP: ${exitIP.ip}", desc))
-        }
-
-        return findings
-    }
 }

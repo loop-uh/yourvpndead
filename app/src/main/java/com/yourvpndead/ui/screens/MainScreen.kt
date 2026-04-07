@@ -292,7 +292,7 @@ private fun DirectSignsCard(directSigns: DirectSignsResult) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -425,9 +425,9 @@ private fun IndirectSignsCard(indirectSigns: IndirectSignsResult) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = if (hasWarnings)
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                Color(0xFFFF5252).copy(alpha = 0.12f)
             else
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -550,10 +550,10 @@ private fun CheckItem(isOk: Boolean, text: String) {
 @Composable
 private fun FindingCard(finding: Finding) {
     val containerColor = when (finding.severity) {
-        Severity.CRITICAL -> MaterialTheme.colorScheme.errorContainer
-        Severity.WARNING -> Color(0xFFFFF3E0)
-        Severity.INFO -> MaterialTheme.colorScheme.secondaryContainer
-        Severity.SAFE -> Color(0xFFE8F5E9)
+        Severity.CRITICAL -> Color(0xFFFF5252).copy(alpha = 0.15f)
+        Severity.WARNING -> Color(0xFFFF9800).copy(alpha = 0.12f)
+        Severity.INFO -> Color(0xFF2196F3).copy(alpha = 0.10f)
+        Severity.SAFE -> Color(0xFF4CAF50).copy(alpha = 0.10f)
     }
 
     Card(colors = CardDefaults.cardColors(containerColor = containerColor)) {

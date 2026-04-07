@@ -46,6 +46,7 @@ class DirectSignsChecker(private val context: Context) {
             "org.torproject.android" to "Tor Browser",
             "info.guardianproject.orfox" to "Orbot",
             "org.torproject.torbrowser" to "Tor Browser (official)",
+            "org.amnezia.vpn" to "Amnezia VPN",
         )
 
         /** Известные прокси-порты */

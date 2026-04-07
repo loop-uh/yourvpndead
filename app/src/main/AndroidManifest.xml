@@ -25,6 +25,7 @@
         <package android:name="org.torproject.android" />
         <package android:name="info.guardianproject.orfox" />
         <package android:name="org.torproject.torbrowser" />
+        <package android:name="org.amnezia.vpn" />
     </queries>
 
     <application
