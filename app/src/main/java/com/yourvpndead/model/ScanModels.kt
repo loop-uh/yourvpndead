@@ -120,28 +120,118 @@ data class SniffAttempt(
     val conclusion: String = ""
 )
 
+/** Информация о профиле/окружении */
+data class ProfileInfo(
+    val isManagedProfile: Boolean = false,
+    val profileCount: Int = 1,
+    val currentUserId: Int = 0,
+    val isDeviceOwner: Boolean = false,
+    val isProfileOwner: Boolean = false,
+    val hasShelter: Boolean = false,
+    val hasIsland: Boolean = false,
+    val hasInsular: Boolean = false,
+    val hasKnox: Boolean = false,
+    val vpn: VpnInfo = VpnInfo(),
+    val interfaces: List<Any> = emptyList()
+) {
+    val isIsolated: Boolean get() = isManagedProfile || hasShelter || hasIsland || hasInsular || hasKnox
+    val isolationMethod: String get() = when {
+        isManagedProfile && hasKnox -> "Samsung Knox (Work Profile)"
+        isManagedProfile && hasShelter -> "Shelter (Work Profile)"
+        isManagedProfile && hasIsland -> "Island (Work Profile)"
+        isManagedProfile && hasInsular -> "Insular (Work Profile)"
+        isManagedProfile -> "Android Work Profile"
+        hasKnox -> "Samsung Knox detected (не в профиле)"
+        hasShelter -> "Shelter detected (не в профиле)"
+        else -> "Нет изоляции"
+    }
+}
+
+/** VPN status */
+data class VpnInfo(
+    val isActiveByTransport: Boolean = false,
+    val isActiveByInterface: Boolean = false,
+    val tunInterfaces: List<String> = emptyList(),
+    val transportTypes: List<String> = emptyList()
+) {
+    val isActive: Boolean get() = isActiveByTransport || isActiveByInterface
+}
+
+/** Clash API result */
+data class ClashAPIResult(
+    val port: Int,
+    val accessible: Boolean = false,
+    val mode: String = "",
+    val connections: List<ClashConnection> = emptyList(),
+    val proxyNames: List<String> = emptyList(),
+    val leakedDestIPs: List<String> = emptyList(),
+    val totalUpload: Long = 0,
+    val totalDownload: Long = 0
+)
+
+data class ClashConnection(
+    val id: String = "",
+    val destinationIP: String = "",
+    val host: String = "",
+    val processPath: String = "",
+    val network: String = "",
+    val sourceIP: String = "",
+    val sourcePort: String = "",
+    val upload: Long = 0,
+    val download: Long = 0,
+    val chains: List<String> = emptyList(),
+    val rule: String = "",
+    val rulePayload: String = ""
+)
+
+/** Порт из /proc/net/tcp */
+data class ListeningPort(
+    val port: Int,
+    val uid: Int,
+    val isLocalhost: Boolean,
+    val listenAll: Boolean,
+    val clientGuess: String? = null,
+    val source: String = "tcp"
+)
+
+/** Предположение о VPN-клиенте */
+data class VpnClientGuess(
+    val name: String,
+    val confidence: Int,
+    val evidence: List<String> = emptyList()
+)
+
 /** Полный результат скана */
 data class ScanResult(
     val timestamp: Long = System.currentTimeMillis(),
     val device: DeviceFingerprint? = null,
+    val profile: ProfileInfo? = null,
     val openPorts: List<OpenPort> = emptyList(),
+    val listeningPorts: List<ListeningPort> = emptyList(),
+    val vpnClientGuesses: List<VpnClientGuess> = emptyList(),
     val proxies: List<ProxyInfo> = emptyList(),
     val exitIPs: List<ExitIPInfo> = emptyList(),
     val xrayAPI: XrayAPIInfo? = null,
+    val clashAPI: ClashAPIResult? = null,
     val authProbes: List<AuthProbeResult> = emptyList(),
     val findings: List<Finding> = emptyList()
 ) {
     val vulnerableCount: Int get() = proxies.count { it.vulnerable }
-    val isVulnerable: Boolean get() = vulnerableCount > 0 || xrayAPI?.accessible == true
+    val isVulnerable: Boolean get() = vulnerableCount > 0
+        || xrayAPI?.accessible == true
+        || clashAPI?.accessible == true
 }
 
 /** Состояние UI скана */
 enum class ScanPhase(val label: String) {
     IDLE("Готов к скану"),
+    PROFILE_DETECT("Определение профиля и окружения..."),
     DEVICE_INFO("Сбор информации об устройстве..."),
+    PROC_NET_SCAN("Анализ /proc/net/tcp..."),
     PORT_SCAN("Сканирование портов..."),
     PROXY_PROBE("Определение типов прокси..."),
-    API_DETECT("Поиск xray API..."),
+    API_DETECT("Поиск xray gRPC API..."),
+    CLASH_API("Поиск Clash REST API..."),
     AUTH_PROBE("Проверка аутентификации и попытка перехвата..."),
     EXIT_IP("Получение выходного IP..."),
     GEO_LOOKUP("Геолокация IP..."),

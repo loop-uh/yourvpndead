@@ -9,9 +9,12 @@ import com.yourvpndead.model.*
  */
 class ScanOrchestrator(context: Context) {
 
+    private val profileDetector = ProfileDetector(context)
+    private val procNetScanner = ProcNetScanner()
     private val portScanner = PortScanner()
     private val socks5Probe = Socks5Probe()
     private val authProbe = AuthProbe()
+    private val clashAPIProbe = ClashAPIProbe()
     private val exitIPResolver = ExitIPResolver()
     private val xrayAPIDetector = XrayAPIDetector()
     private val deviceInfoCollector = DeviceInfoCollector(context)
@@ -28,9 +31,58 @@ class ScanOrchestrator(context: Context) {
     ): ScanResult {
         val findings = mutableListOf<Finding>()
 
+        // Фаза 0: Профиль и окружение
+        onPhase(ScanPhase.PROFILE_DETECT)
+        onProgress(0.02f)
+        val profile = profileDetector.detect()
+
+        if (profile.isIsolated) {
+            findings.add(Finding(
+                Severity.WARNING,
+                "📱 Запущено в изолированном профиле: ${profile.isolationMethod}",
+                "ВНИМАНИЕ: изоляция профиля НЕ защищает loopback (127.0.0.1).\n" +
+                "Приложения из другого профиля могут сканировать ваши порты.",
+                mapOf("User ID" to profile.currentUserId.toString(), "Профилей" to profile.profileCount.toString())
+            ))
+        }
+
+        if (profile.vpn.isActive) {
+            findings.add(Finding(
+                Severity.INFO, "🔒 VPN активен",
+                "Обнаружен через: ${profile.vpn.transportTypes.joinToString()}\n" +
+                "TUN интерфейсы: ${profile.vpn.tunInterfaces.joinToString().ifEmpty { "не найдены" }}"
+            ))
+        }
+
+        // Фаза 0.5: /proc/net/tcp анализ
+        onPhase(ScanPhase.PROC_NET_SCAN)
+        onProgress(0.04f)
+        val listeningPorts = procNetScanner.scanListeningPorts()
+        val clientGuesses = procNetScanner.identifyVpnClient(listeningPorts)
+
+        if (listeningPorts.isNotEmpty()) {
+            findings.add(Finding(
+                Severity.INFO,
+                "📊 /proc/net/tcp: ${listeningPorts.size} listening портов на localhost",
+                listeningPorts.joinToString("\n") { port ->
+                    val guess = port.clientGuess ?: "unknown"
+                    val scope = if (port.listenAll) "0.0.0.0 ⚠️" else "127.0.0.1"
+                    ":${port.port} (UID ${port.uid}, $scope) — $guess"
+                }
+            ))
+        }
+
+        clientGuesses.forEach { guess ->
+            findings.add(Finding(
+                Severity.WARNING,
+                "🔍 Обнаружен: ${guess.name} (${guess.confidence}%)",
+                "Доказательства: ${guess.evidence.joinToString(", ")}"
+            ))
+        }
+
         // Фаза 1: Информация об устройстве
         onPhase(ScanPhase.DEVICE_INFO)
-        onProgress(0.05f)
+        onProgress(0.08f)
         val device = deviceInfoCollector.collect()
 
         if (device.isVpnActive) {
@@ -93,6 +145,34 @@ class ScanOrchestrator(context: Context) {
                 "⚠️ xray API обнаружен на порту ${xrayApi.port}!",
                 xrayApi.details,
                 mapOf("Порт" to xrayApi.port.toString())
+            ))
+        }
+
+        // Фаза 4.5: Clash REST API
+        onPhase(ScanPhase.CLASH_API)
+        onProgress(0.68f)
+        val clashApi = clashAPIProbe.probe()
+
+        if (clashApi != null) {
+            findings.add(Finding(
+                Severity.CRITICAL,
+                "🌐 Clash API обнаружен на порту ${clashApi.port}!",
+                buildString {
+                    append("REST API без аутентификации.\n")
+                    append("Режим: ${clashApi.mode}\n")
+                    append("Активных соединений: ${clashApi.connections.size}\n")
+                    append("Прокси: ${clashApi.proxyNames.joinToString().take(100)}\n")
+                    if (clashApi.leakedDestIPs.isNotEmpty()) {
+                        append("\n🔴 УТЕЧКА IP серверов через /connections:\n")
+                        clashApi.leakedDestIPs.forEach { append("  → $it\n") }
+                    }
+                },
+                mapOf(
+                    "Порт" to clashApi.port.toString(),
+                    "Соединений" to clashApi.connections.size.toString(),
+                    "Upload" to "${clashApi.totalUpload / 1024} KB",
+                    "Download" to "${clashApi.totalDownload / 1024} KB"
+                )
             ))
         }
 
@@ -186,10 +266,14 @@ class ScanOrchestrator(context: Context) {
 
         return ScanResult(
             device = device,
+            profile = profile,
             openPorts = openPorts,
+            listeningPorts = listeningPorts,
+            vpnClientGuesses = clientGuesses,
             proxies = proxies,
             exitIPs = exitIPsWithGeo,
             xrayAPI = xrayApi,
+            clashAPI = clashApi,
             authProbes = authResults,
             findings = findings
         )
