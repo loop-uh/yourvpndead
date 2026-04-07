@@ -1,4 +1,5 @@
 # YourVPNDead
+<img width="200" alt="image" src="https://github.com/user-attachments/assets/21bb2e1e-6669-4dbc-8062-e5eec43003a7" />
 
 **Самопроверка на обнаружение VPN/прокси на Android**
 
