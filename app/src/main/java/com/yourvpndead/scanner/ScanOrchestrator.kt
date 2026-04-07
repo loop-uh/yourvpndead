@@ -19,6 +19,7 @@ class ScanOrchestrator(context: Context) {
     private val xrayAPIDetector = XrayAPIDetector()
     private val deviceInfoCollector = DeviceInfoCollector(context)
     private val geoLocator = GeoLocator()
+    private val directSignsChecker = DirectSignsChecker(context)
 
     /**
      * Быстрый скан — только известные порты.
@@ -80,6 +81,89 @@ class ScanOrchestrator(context: Context) {
             ))
         }
 
+        // Фаза 0.7: Прямые признаки VPN/прокси
+        onPhase(ScanPhase.DIRECT_SIGNS)
+        onProgress(0.06f)
+        val directSigns = directSignsChecker.fullCheck()
+
+        // VPN Transport
+        if (directSigns.vpnTransport.detected) {
+            val transport = directSigns.vpnTransport
+            findings.add(Finding(
+                Severity.INFO,
+                "🔍 VPN обнаружен через NetworkCapabilities",
+                buildString {
+                    if (transport.hasTransportVpn) append("TRANSPORT_VPN: Да\n")
+                    if (transport.hasIsVpnFlag) append("IS_VPN (скрытый флаг): Да\n")
+                    if (transport.hasVpnTransportInfo) append("VpnTransportInfo: Да\n")
+                },
+                mapOf("capsString" to transport.capsString.take(200))
+            ))
+        }
+
+        // System Proxy
+        if (directSigns.systemProxy.detected) {
+            val proxy = directSigns.systemProxy
+            findings.add(Finding(
+                Severity.WARNING,
+                "⚠️ Системные прокси-переменные обнаружены",
+                buildString {
+                    proxy.httpProxyHost?.let { append("HTTP proxy: $it:${proxy.httpProxyPort}\n") }
+                    proxy.socksProxyHost?.let { append("SOCKS proxy: $it:${proxy.socksProxyPort}\n") }
+                    if (proxy.isKnownPort) append("Известный порт: ${proxy.knownPortLabel}\n")
+                }
+            ))
+        }
+
+        // Installed VPN apps
+        val installedApps = directSigns.installedVpnApps.filter { it.installed }
+        if (installedApps.isNotEmpty()) {
+            findings.add(Finding(
+                Severity.WARNING,
+                "📦 Обнаружено ${installedApps.size} VPN-приложений",
+                installedApps.joinToString("\n") { "• ${it.appName} (${it.packageName})" },
+                mapOf("Количество" to installedApps.size.toString())
+            ))
+        }
+
+        // VPN interfaces
+        if (directSigns.interfaces.isNotEmpty()) {
+            findings.add(Finding(
+                Severity.WARNING,
+                "🌐 VPN-интерфейсы: ${directSigns.interfaces.joinToString { it.name }}",
+                directSigns.interfaces.joinToString("\n") {
+                    "${it.name} (${it.type}/${it.protocol}) — IP: ${it.ips.joinToString()}"
+                }
+            ))
+        }
+
+        // Routing table
+        val vpnRoutes = directSigns.routingEntries.filter { it.isVpnRoute }
+        if (vpnRoutes.isNotEmpty()) {
+            findings.add(Finding(
+                Severity.WARNING,
+                "🛣️ VPN-маршруты в таблице маршрутизации",
+                vpnRoutes.joinToString("\n") {
+                    "Default route через ${it.interfaceName} → ${it.gateway}"
+                }
+            ))
+        }
+
+        // Split tunnel
+        directSigns.splitTunnel?.let { split ->
+            if (split.isSplitTunnel) {
+                findings.add(Finding(
+                    Severity.WARNING,
+                    "🔀 Split tunnel обнаружен",
+                    split.details,
+                    mapOf(
+                        "Прямой IP" to (split.directIp ?: "?"),
+                        "Proxy IP" to (split.proxyIp ?: "?")
+                    )
+                ))
+            }
+        }
+
         // Фаза 1: Информация об устройстве
         onPhase(ScanPhase.DEVICE_INFO)
         onProgress(0.08f)
@@ -102,7 +186,7 @@ class ScanOrchestrator(context: Context) {
                 Severity.SAFE, "Открытых прокси-портов не найдено",
                 "Ни один из ${PortScanner.KNOWN_PORTS.size} известных портов не открыт на localhost"
             ))
-            return ScanResult(device = device, openPorts = openPorts, findings = findings)
+            return ScanResult(device = device, openPorts = openPorts, directSigns = directSigns, findings = findings)
         }
 
         findings.add(Finding(
@@ -270,6 +354,7 @@ class ScanOrchestrator(context: Context) {
             openPorts = openPorts,
             listeningPorts = listeningPorts,
             vpnClientGuesses = clientGuesses,
+            directSigns = directSigns,
             proxies = proxies,
             exitIPs = exitIPsWithGeo,
             xrayAPI = xrayApi,
@@ -286,6 +371,7 @@ class ScanOrchestrator(context: Context) {
     ): ScanResult {
         onPhase(ScanPhase.DEVICE_INFO)
         val device = deviceInfoCollector.collect()
+        val directSigns = directSignsChecker.fullCheck()
 
         onPhase(ScanPhase.PORT_SCAN)
         val openPorts = portScanner.scanFullRange { onProgress(it * 0.5f) }
@@ -317,7 +403,7 @@ class ScanOrchestrator(context: Context) {
         // Findings генерируются аналогично quickScan
         val findings = buildFindings(device, openPorts, proxies, xrayApi, exitIPsWithGeo)
         return ScanResult(device = device, openPorts = openPorts, proxies = proxies,
-            exitIPs = exitIPsWithGeo, xrayAPI = xrayApi, findings = findings)
+            directSigns = directSigns, exitIPs = exitIPsWithGeo, xrayAPI = xrayApi, findings = findings)
     }
 
     private fun buildFindings(

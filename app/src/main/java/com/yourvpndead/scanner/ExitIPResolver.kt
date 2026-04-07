@@ -20,6 +20,7 @@ class ExitIPResolver {
         private const val IP_SERVICE_PORT = 80
         private const val CONNECT_TIMEOUT = 5000
         private const val READ_TIMEOUT = 10000
+        private val IP_REGEX = Regex("""(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})""")
     }
 
     /**
@@ -79,7 +80,4 @@ class ExitIPResolver {
         }
     }
 
-    private companion object {
-        val IP_REGEX = Regex("""(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})""")
-    }
 }

@@ -3,6 +3,29 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <queries>
+        <package android:name="com.v2ray.ang" />
+        <package android:name="io.nekohasekai.sfa" />
+        <package android:name="app.hiddify.com" />
+        <package android:name="com.github.metacubex.clash.meta" />
+        <package android:name="com.github.shadowsocks" />
+        <package android:name="com.github.shadowsocks.tv" />
+        <package android:name="com.happproxy" />
+        <package android:name="io.github.saeeddev94.xray" />
+        <package android:name="moe.nb4a" />
+        <package android:name="io.github.dovecoteescapee.byedpi" />
+        <package android:name="com.romanvht.byebyedpi" />
+        <package android:name="org.outline.android.client" />
+        <package android:name="com.psiphon3" />
+        <package android:name="org.getlantern.lantern" />
+        <package android:name="com.wireguard.android" />
+        <package android:name="com.strongswan.android" />
+        <package android:name="org.torproject.android" />
+        <package android:name="info.guardianproject.orfox" />
+        <package android:name="org.torproject.torbrowser" />
+    </queries>
 
     <application
         android:allowBackup="false"

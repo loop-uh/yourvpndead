@@ -114,6 +114,71 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             result.openPorts.forEach { appendLine("  :${it.port} (${it.responseMs}ms)") }
             appendLine()
 
+            // Direct Signs section
+            result.directSigns?.let { ds ->
+                append("\n=== ПРЯМЫЕ ПРИЗНАКИ VPN/ПРОКСИ ===\n")
+
+                // VPN Transport
+                append("\n--- NetworkCapabilities ---\n")
+                if (ds.vpnTransport.detected) {
+                    append("TRANSPORT_VPN: ${if (ds.vpnTransport.hasTransportVpn) "Да" else "Нет"}\n")
+                    append("IS_VPN (hidden): ${if (ds.vpnTransport.hasIsVpnFlag) "Да" else "Нет"}\n")
+                    append("VpnTransportInfo: ${if (ds.vpnTransport.hasVpnTransportInfo) "Да" else "Нет"}\n")
+                } else {
+                    append("VPN не обнаружен через NetworkCapabilities\n")
+                }
+
+                // System Proxy
+                append("\n--- Системные прокси ---\n")
+                if (ds.systemProxy.detected) {
+                    ds.systemProxy.httpProxyHost?.let { append("HTTP: $it:${ds.systemProxy.httpProxyPort}\n") }
+                    ds.systemProxy.socksProxyHost?.let { append("SOCKS: $it:${ds.systemProxy.socksProxyPort}\n") }
+                    if (ds.systemProxy.isKnownPort) append("Известный порт: ${ds.systemProxy.knownPortLabel}\n")
+                } else {
+                    append("Системный прокси не настроен\n")
+                }
+
+                // Installed VPN apps
+                val installed = ds.installedVpnApps.filter { it.installed }
+                append("\n--- Установленные VPN-приложения (${installed.size}) ---\n")
+                if (installed.isNotEmpty()) {
+                    installed.forEach { append("  • ${it.appName} (${it.packageName})\n") }
+                } else {
+                    append("Не обнаружены\n")
+                }
+
+                // VPN Interfaces
+                append("\n--- VPN-интерфейсы ---\n")
+                if (ds.interfaces.isNotEmpty()) {
+                    ds.interfaces.forEach {
+                        append("  ${it.name}: ${it.type}/${it.protocol}, IP: ${it.ips.joinToString()}\n")
+                    }
+                } else {
+                    append("VPN-интерфейсы не обнаружены\n")
+                }
+
+                // Routing table
+                append("\n--- Таблица маршрутизации ---\n")
+                val defaultRoutes = ds.routingEntries.filter { it.isDefaultRoute }
+                if (defaultRoutes.isNotEmpty()) {
+                    defaultRoutes.forEach {
+                        val vpnFlag = if (it.isVpnRoute) " ⚠️ VPN" else ""
+                        append("  ${it.interfaceName}: ${it.destination} → ${it.gateway}$vpnFlag\n")
+                    }
+                } else {
+                    append("Нет данных\n")
+                }
+
+                // Split tunnel
+                ds.splitTunnel?.let { st ->
+                    append("\n--- Split Tunnel ---\n")
+                    append("Прямой IP: ${st.directIp ?: "не определён"}\n")
+                    append("Proxy IP: ${st.proxyIp ?: "не проверялся"}\n")
+                    append("Split tunnel: ${if (st.isSplitTunnel) "Обнаружен" else "Нет"}\n")
+                    append("${st.details}\n")
+                }
+            }
+
             if (result.proxies.isNotEmpty()) {
                 appendLine("── Proxies Found ──")
                 result.proxies.forEach { proxy ->

@@ -201,6 +201,72 @@ data class VpnClientGuess(
     val evidence: List<String> = emptyList()
 )
 
+/** 2.1 Детекция VPN через NetworkCapabilities */
+data class VpnTransportDetection(
+    val hasTransportVpn: Boolean = false,
+    val hasIsVpnFlag: Boolean = false,
+    val hasVpnTransportInfo: Boolean = false,
+    val capsString: String = "",
+    val detected: Boolean = false
+)
+
+/** 2.2 Системные прокси-переменные */
+data class SystemProxyDetection(
+    val httpProxyHost: String? = null,
+    val httpProxyPort: String? = null,
+    val socksProxyHost: String? = null,
+    val socksProxyPort: String? = null,
+    val isKnownPort: Boolean = false,
+    val knownPortLabel: String? = null,
+    val detected: Boolean = false
+)
+
+/** 2.3 Установленное VPN-приложение */
+data class InstalledVpnApp(
+    val packageName: String,
+    val appName: String,
+    val installed: Boolean = false
+)
+
+/** 3.2 Обнаруженный VPN-интерфейс */
+data class InterfaceDetection(
+    val name: String,
+    val type: String,
+    val protocol: String,
+    val isUp: Boolean,
+    val ips: List<String> = emptyList(),
+    val vpnIndicator: Boolean = false
+)
+
+/** 3.4 Запись таблицы маршрутизации */
+data class RoutingEntry(
+    val destination: String,
+    val gateway: String,
+    val interfaceName: String,
+    val mask: String = "",
+    val flags: String = "",
+    val isDefaultRoute: Boolean = false,
+    val isVpnRoute: Boolean = false
+)
+
+/** Результат проверки split tunnel */
+data class SplitTunnelResult(
+    val directIp: String? = null,
+    val proxyIp: String? = null,
+    val isSplitTunnel: Boolean = false,
+    val details: String = ""
+)
+
+/** Полный результат прямых признаков */
+data class DirectSignsResult(
+    val vpnTransport: VpnTransportDetection = VpnTransportDetection(),
+    val systemProxy: SystemProxyDetection = SystemProxyDetection(),
+    val installedVpnApps: List<InstalledVpnApp> = emptyList(),
+    val interfaces: List<InterfaceDetection> = emptyList(),
+    val routingEntries: List<RoutingEntry> = emptyList(),
+    val splitTunnel: SplitTunnelResult? = null
+)
+
 /** Полный результат скана */
 data class ScanResult(
     val timestamp: Long = System.currentTimeMillis(),
@@ -209,6 +275,7 @@ data class ScanResult(
     val openPorts: List<OpenPort> = emptyList(),
     val listeningPorts: List<ListeningPort> = emptyList(),
     val vpnClientGuesses: List<VpnClientGuess> = emptyList(),
+    val directSigns: DirectSignsResult? = null,
     val proxies: List<ProxyInfo> = emptyList(),
     val exitIPs: List<ExitIPInfo> = emptyList(),
     val xrayAPI: XrayAPIInfo? = null,
@@ -228,6 +295,7 @@ enum class ScanPhase(val label: String) {
     PROFILE_DETECT("Определение профиля и окружения..."),
     DEVICE_INFO("Сбор информации об устройстве..."),
     PROC_NET_SCAN("Анализ /proc/net/tcp..."),
+    DIRECT_SIGNS("Прямые признаки VPN/прокси..."),
     PORT_SCAN("Сканирование портов..."),
     PROXY_PROBE("Определение типов прокси..."),
     API_DETECT("Поиск xray gRPC API..."),

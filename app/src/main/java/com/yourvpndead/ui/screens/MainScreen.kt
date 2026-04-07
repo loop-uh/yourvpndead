@@ -143,6 +143,13 @@ fun MainScreen(viewModel: ScanViewModel) {
                     }
                 }
 
+                // Прямые признаки VPN/прокси
+                result.directSigns?.let { ds ->
+                    item {
+                        DirectSignsCard(ds)
+                    }
+                }
+
                 // Findings
                 if (result.findings.isNotEmpty()) {
                     item {
@@ -267,6 +274,132 @@ private fun DeviceCard(device: DeviceFingerprint) {
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DirectSignsCard(directSigns: DirectSignsResult) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "🔍 Прямые признаки VPN/прокси",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // VPN Transport
+            if (directSigns.vpnTransport.detected) {
+                Text("NetworkCapabilities:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                if (directSigns.vpnTransport.hasTransportVpn) InfoRow("TRANSPORT_VPN", "Да ✅")
+                if (directSigns.vpnTransport.hasIsVpnFlag) InfoRow("IS_VPN (hidden)", "Да ⚠️")
+                if (directSigns.vpnTransport.hasVpnTransportInfo) InfoRow("VpnTransportInfo", "Да ⚠️")
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // System Proxy
+            if (directSigns.systemProxy.detected) {
+                Text("Системный прокси:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                directSigns.systemProxy.httpProxyHost?.let {
+                    InfoRow("HTTP proxy", "$it:${directSigns.systemProxy.httpProxyPort}")
+                }
+                directSigns.systemProxy.socksProxyHost?.let {
+                    InfoRow("SOCKS proxy", "$it:${directSigns.systemProxy.socksProxyPort}")
+                }
+                if (directSigns.systemProxy.isKnownPort) {
+                    InfoRow("Известный порт", directSigns.systemProxy.knownPortLabel ?: "")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Installed VPN Apps
+            val installed = directSigns.installedVpnApps.filter { it.installed }
+            if (installed.isNotEmpty()) {
+                Text(
+                    "📦 Установлено VPN-приложений: ${installed.size}",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+                installed.forEach { app ->
+                    Text(
+                        "  • ${app.appName}",
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // VPN Interfaces
+            if (directSigns.interfaces.isNotEmpty()) {
+                Text("🌐 VPN-интерфейсы:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                directSigns.interfaces.forEach { iface ->
+                    InfoRow(iface.name, "${iface.type} / ${iface.protocol}")
+                    if (iface.ips.isNotEmpty()) {
+                        Text(
+                            "    IP: ${iface.ips.joinToString()}",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Routing Table
+            val vpnRoutes = directSigns.routingEntries.filter { it.isVpnRoute }
+            if (vpnRoutes.isNotEmpty()) {
+                Text(
+                    "🛣️ VPN-маршруты:",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+                vpnRoutes.forEach { route ->
+                    InfoRow(route.interfaceName, "→ ${route.gateway}")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Also show all default routes for reference
+            val defaultRoutes = directSigns.routingEntries.filter { it.isDefaultRoute && !it.isVpnRoute }
+            if (defaultRoutes.isNotEmpty()) {
+                Text("📋 Default routes:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                defaultRoutes.forEach { route ->
+                    Text(
+                        "  ${route.interfaceName}: ${route.destination} → ${route.gateway}",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Split Tunnel
+            directSigns.splitTunnel?.let { st ->
+                if (st.isSplitTunnel) {
+                    Text(
+                        "🔀 Split Tunnel обнаружен!",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                st.directIp?.let { InfoRow("Прямой IP", it) }
+                st.proxyIp?.let { InfoRow("Proxy IP", it) }
+                if (st.details.isNotBlank()) {
+                    Text(st.details, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
