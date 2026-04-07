@@ -7,7 +7,7 @@ import com.yourvpndead.model.*
  * Оркестратор — запускает все модули скана последовательно,
  * собирает результаты и формирует итоговый ScanResult с findings.
  */
-class ScanOrchestrator(context: Context) {
+class ScanOrchestrator(private val context: Context) {
 
     private val profileDetector = ProfileDetector(context)
     private val procNetScanner = ProcNetScanner()
@@ -105,18 +105,25 @@ class ScanOrchestrator(context: Context) {
                 Severity.CRITICAL,
                 "🔴 Обнаружены вероятные VPN-серверы (${vpnServerCandidates.size})",
                 buildString {
-                    append("Метод: анализ /proc/net/tcp + /proc/net/udp (ESTABLISHED-соединения)\n")
-                    append("Найдены соединения с публичными IP на характерных VPN-портах:\n\n")
+                    append("Метод: /proc/net/tcp + /proc/net/udp (ESTABLISHED-соединения)\n\n")
                     vpnServerCandidates.forEach { conn ->
+                        val appName = resolveUidToPackage(conn.uid)
                         append("  ${conn.protocol} → ${conn.remoteIp}:${conn.remotePort}")
                         append(" — ${conn.serverGuess}")
-                        append(" (вероятность: ${conn.vpnLikelihood}%)\n")
+                        append(" (${conn.vpnLikelihood}%)\n")
+                        if (appName != null) {
+                            append("    📦 Приложение: $appName (UID ${conn.uid})\n")
+                        } else {
+                            append("    UID: ${conn.uid}\n")
+                        }
                     }
-                    append("\nЭти IP-адреса могут быть переданы для блокировки.")
+                    append("\nЭти IP могут быть переданы для блокировки.")
                 },
                 buildMap {
                     vpnServerCandidates.forEachIndexed { i, conn ->
-                        put("Сервер ${i + 1}", "${conn.remoteIp}:${conn.remotePort} (${conn.serverGuess})")
+                        val appName = resolveUidToPackage(conn.uid)
+                        val label = if (appName != null) "$appName → " else ""
+                        put("Сервер ${i + 1}", "$label${conn.remoteIp}:${conn.remotePort} (${conn.serverGuess})")
                     }
                 }
             ))
@@ -125,12 +132,13 @@ class ScanOrchestrator(context: Context) {
         if (establishedConnections.isNotEmpty() && vpnServerCandidates.isEmpty()) {
             findings.add(Finding(
                 Severity.INFO,
-                "📊 Активных соединений: ${establishedConnections.size}",
+                "📊 Активных соединений: ${establishedConnections.size}, VPN не обнаружен",
                 buildString {
                     append("Метод: /proc/net/tcp + /proc/net/udp\n")
-                    append("Публичные соединения (ни одно не похоже на VPN):\n")
                     establishedConnections.take(10).forEach { conn ->
-                        append("  ${conn.protocol} → ${conn.remoteIp}:${conn.remotePort} (${conn.serverGuess})\n")
+                        val appName = resolveUidToPackage(conn.uid)
+                        val app = if (appName != null) " [$appName]" else ""
+                        append("  ${conn.protocol} → ${conn.remoteIp}:${conn.remotePort}$app\n")
                     }
                     if (establishedConnections.size > 10) {
                         append("  ... и ещё ${establishedConnections.size - 10}\n")
@@ -539,10 +547,10 @@ class ScanOrchestrator(context: Context) {
             ))
         }
 
-        // === Сводка: все обнаруженные VPN-серверы ===
+        // === Сводка: все обнаруженные VPN-серверы + геолокация ===
         val vpnServerIPs = mutableListOf<Triple<String, String, String>>() // IP, source, type
 
-        // Источник 1: Host routes из /proc/net/route (самый надёжный)
+        // Источник 1: Host routes из /proc/net/route
         directSigns.routingEntries
             .filter { it.isVpnServerRoute && it.destination != "0.0.0.0" }
             .forEach { route ->
@@ -553,12 +561,12 @@ class ScanOrchestrator(context: Context) {
                 ))
             }
 
-        // Источник 2: Established connections с высокой вероятностью VPN
+        // Источник 2: Established connections
         establishedConnections.filter { it.vpnLikelihood >= 60 }.forEach { conn ->
             if (vpnServerIPs.none { it.first == conn.remoteIp }) {
                 vpnServerIPs.add(Triple(
                     "${conn.remoteIp}:${conn.remotePort}",
-                    "/proc/net/${conn.protocol.lowercase()} (${conn.state})",
+                    "/proc/net/${conn.protocol.lowercase()}",
                     conn.serverGuess
                 ))
             }
@@ -576,22 +584,40 @@ class ScanOrchestrator(context: Context) {
         }
 
         if (vpnServerIPs.isNotEmpty()) {
+            // Геолокация VPN-серверов
+            onPhase(ScanPhase.GEO_LOOKUP)
+            val vpnServerGeo = vpnServerIPs.map { (ip, source, type) ->
+                val cleanIp = ip.split(":").first() // remove port if present
+                val geo = geoLocator.locate(cleanIp)
+                Triple(ip, source, type) to geo
+            }
+
             findings.add(Finding(
                 Severity.CRITICAL,
                 "🎯 IP VPN-серверов раскрыты: ${vpnServerIPs.size} адресов",
                 buildString {
                     append("Все обнаруженные IP-адреса VPN-серверов:\n\n")
-                    vpnServerIPs.forEachIndexed { i, (ip, source, type) ->
+                    vpnServerGeo.forEachIndexed { i, (triple, geo) ->
+                        val (ip, source, type) = triple
                         append("${i + 1}. $ip\n")
                         append("   Тип: $type\n")
-                        append("   Источник: $source\n\n")
+                        append("   Источник: $source\n")
+                        if (geo != null) {
+                            append("   🌍 ${geo.country}, ${geo.city}\n")
+                            append("   ISP: ${geo.isp}\n")
+                            append("   AS: ${geo.asNumber}\n")
+                            if (geo.isHosting) append("   Хостинг: Да\n")
+                        }
+                        append("\n")
                     }
                     append("⚠️ Эти IP могут быть переданы для блокировки.\n")
                     append("Работает даже при раздельном туннелировании.")
                 },
                 buildMap {
-                    vpnServerIPs.forEachIndexed { i, (ip, _, type) ->
-                        put("Сервер ${i + 1}", "$ip ($type)")
+                    vpnServerGeo.forEachIndexed { i, (triple, geo) ->
+                        val (ip, _, type) = triple
+                        val geoStr = geo?.let { " — ${it.country}, ${it.city}, ${it.isp}" } ?: ""
+                        put("Сервер ${i + 1}", "$ip ($type)$geoStr")
                     }
                 }
             ))
@@ -615,6 +641,14 @@ class ScanOrchestrator(context: Context) {
             authProbes = authResults,
             findings = findings
         )
+    }
+
+    /** Resolve UID to package name via PackageManager */
+    private fun resolveUidToPackage(uid: Int): String? {
+        return try {
+            val packages = context.packageManager.getPackagesForUid(uid)
+            packages?.firstOrNull()
+        } catch (_: Exception) { null }
     }
 
 }
