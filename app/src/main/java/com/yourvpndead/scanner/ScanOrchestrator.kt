@@ -20,6 +20,7 @@ class ScanOrchestrator(context: Context) {
     private val deviceInfoCollector = DeviceInfoCollector(context)
     private val geoLocator = GeoLocator()
     private val directSignsChecker = DirectSignsChecker(context)
+    private val indirectSignsChecker = IndirectSignsChecker(context)
 
     /**
      * Быстрый скан — только известные порты.
@@ -164,6 +165,137 @@ class ScanOrchestrator(context: Context) {
             }
         }
 
+        // Фаза 0.8: Косвенные признаки VPN
+        onPhase(ScanPhase.INDIRECT_SIGNS)
+        onProgress(0.07f)
+        val indirectSigns = indirectSignsChecker.fullCheck()
+
+        // NOT_VPN capability
+        val notVpn = indirectSigns.notVpnCapability
+        if (notVpn.error != null) {
+            findings.add(Finding(
+                Severity.INFO,
+                "ℹ️ NET_CAPABILITY_NOT_VPN: ошибка проверки",
+                "Метод: NetworkCapabilities.hasCapability(NET_CAPABILITY_NOT_VPN)\n" +
+                "Ошибка: ${notVpn.error}"
+            ))
+        } else {
+            findings.add(Finding(
+                if (notVpn.detected) Severity.WARNING else Severity.SAFE,
+                if (notVpn.detected) "⚠️ Capability NOT_VPN: отсутствует (VPN-сеть)"
+                else "✅ Capability NOT_VPN: присутствует (не-VPN сеть)",
+                "Метод: NetworkCapabilities.hasCapability(NET_CAPABILITY_NOT_VPN)\n" +
+                "Результат: ${if (notVpn.hasNotVpnCapability) "присутствует" else "отсутствует"}\n" +
+                "Интерпретация: Android добавляет NOT_VPN ко всем НЕ-VPN сетям.\n" +
+                "Если эта capability отсутствует — система считает сеть VPN.",
+                mapOf("Capabilities" to notVpn.allCapabilities.take(300))
+            ))
+        }
+
+        // MTU аномалии
+        val mtu = indirectSigns.mtuCheck
+        if (mtu.error != null) {
+            findings.add(Finding(
+                Severity.INFO,
+                "ℹ️ MTU: ошибка проверки",
+                "Метод: NetworkInterface.getMTU()\nОшибка: ${mtu.error}"
+            ))
+        } else if (mtu.anomalyDetected) {
+            findings.add(Finding(
+                Severity.WARNING,
+                "⚠️ MTU аномалия обнаружена",
+                buildString {
+                    append("Метод: NetworkInterface.getMTU() для всех активных интерфейсов\n")
+                    append("Стандартный MTU: 1500 (Ethernet/WiFi)\n")
+                    append("VPN снижает MTU из-за инкапсуляции (overhead ~60-120 bytes)\n\n")
+                    mtu.interfaces.forEach {
+                        val marker = if (it.isAnomaly) "⚠️" else "✅"
+                        append("$marker ${it.name}: ${it.details}\n")
+                    }
+                }
+            ))
+        } else {
+            findings.add(Finding(
+                Severity.SAFE,
+                "✅ MTU: аномалий не обнаружено",
+                buildString {
+                    append("Метод: NetworkInterface.getMTU()\n")
+                    mtu.interfaces.forEach {
+                        append("${it.name}: MTU ${it.mtu}\n")
+                    }
+                }
+            ))
+        }
+
+        // DNS проверка
+        val dns = indirectSigns.dnsCheck
+        if (dns.error != null) {
+            findings.add(Finding(
+                Severity.INFO,
+                "ℹ️ DNS: ошибка проверки",
+                "Метод: ConnectivityManager.getLinkProperties().dnsServers\n" +
+                "Ошибка: ${dns.error}"
+            ))
+        } else if (dns.detected) {
+            findings.add(Finding(
+                Severity.WARNING,
+                "⚠️ DNS в частной подсети: ${dns.privateSubnetDns.joinToString()}",
+                buildString {
+                    append("Метод: ConnectivityManager.getLinkProperties().dnsServers\n")
+                    append("DNS-серверы: ${dns.dnsServers.joinToString()}\n")
+                    append("В частной подсети: ${dns.privateSubnetDns.joinToString()}\n\n")
+                    append("Это может указывать на:\n")
+                    append("• VPN-туннель с DNS внутри (WireGuard, OpenVPN)\n")
+                    append("• Локальный DNS-резолвер (Pi-hole, AdGuard Home)\n")
+                    append("• Tailscale/mesh VPN (100.x.x.x — CGN)\n")
+                    dns.privateDnsServerName?.let {
+                        append("\nPrivate DNS (DoT): $it\n")
+                    }
+                },
+                mapOf("DNS серверы" to dns.dnsServers.joinToString())
+            ))
+        } else {
+            findings.add(Finding(
+                Severity.SAFE,
+                "✅ DNS: публичные серверы (${dns.dnsServers.joinToString()})",
+                "Метод: ConnectivityManager.getLinkProperties().dnsServers\n" +
+                "DNS-серверы не в частной подсети — VPN-туннель не обнаружен по DNS."
+            ))
+        }
+
+        // dumpsys проверки
+        val dmp = indirectSigns.dumpsysCheck
+        findings.add(Finding(
+            if (dmp.vpnManagementAccessible || dmp.vpnServiceAccessible) Severity.WARNING else Severity.SAFE,
+            buildString {
+                if (dmp.vpnManagementAccessible || dmp.vpnServiceAccessible) append("⚠️ dumpsys: доступен")
+                else append("✅ dumpsys: недоступен (нормально)")
+            },
+            buildString {
+                append("Метод: Runtime.exec(\"dumpsys ...\")\n\n")
+                append("dumpsys vpn_management: ")
+                if (dmp.vpnManagementAccessible) {
+                    append("ДОСТУПЕН ⚠️\n")
+                    dmp.vpnManagementOutput?.take(500)?.let { append("Вывод: $it\n") }
+                } else {
+                    append("недоступен ✅")
+                    dmp.vpnManagementError?.let { append(" ($it)") }
+                    append("\n")
+                }
+                append("\ndumpsys activity services VpnService: ")
+                if (dmp.vpnServiceAccessible) {
+                    append("ДОСТУПЕН ⚠️\n")
+                    dmp.vpnServiceOutput?.take(500)?.let { append("Вывод: $it\n") }
+                } else {
+                    append("недоступен ✅")
+                    dmp.vpnServiceError?.let { append(" ($it)") }
+                    append("\n")
+                }
+                append("\nОбычные приложения не имеют доступа к dumpsys.\n")
+                append("Если доступен — root/инженерная прошивка/утечка информации.")
+            }
+        ))
+
         // Фаза 1: Информация об устройстве
         onPhase(ScanPhase.DEVICE_INFO)
         onProgress(0.08f)
@@ -186,7 +318,7 @@ class ScanOrchestrator(context: Context) {
                 Severity.SAFE, "Открытых прокси-портов не найдено",
                 "Ни один из ${PortScanner.KNOWN_PORTS.size} известных портов не открыт на localhost"
             ))
-            return ScanResult(device = device, openPorts = openPorts, directSigns = directSigns, findings = findings)
+            return ScanResult(device = device, openPorts = openPorts, directSigns = directSigns, indirectSigns = indirectSigns, findings = findings)
         }
 
         findings.add(Finding(
@@ -355,6 +487,7 @@ class ScanOrchestrator(context: Context) {
             listeningPorts = listeningPorts,
             vpnClientGuesses = clientGuesses,
             directSigns = directSigns,
+            indirectSigns = indirectSigns,
             proxies = proxies,
             exitIPs = exitIPsWithGeo,
             xrayAPI = xrayApi,
@@ -372,6 +505,7 @@ class ScanOrchestrator(context: Context) {
         onPhase(ScanPhase.DEVICE_INFO)
         val device = deviceInfoCollector.collect()
         val directSigns = directSignsChecker.fullCheck()
+        val indirectSigns = indirectSignsChecker.fullCheck()
 
         onPhase(ScanPhase.PORT_SCAN)
         val openPorts = portScanner.scanFullRange { onProgress(it * 0.5f) }
@@ -403,7 +537,7 @@ class ScanOrchestrator(context: Context) {
         // Findings генерируются аналогично quickScan
         val findings = buildFindings(device, openPorts, proxies, xrayApi, exitIPsWithGeo)
         return ScanResult(device = device, openPorts = openPorts, proxies = proxies,
-            directSigns = directSigns, exitIPs = exitIPsWithGeo, xrayAPI = xrayApi, findings = findings)
+            directSigns = directSigns, indirectSigns = indirectSigns, exitIPs = exitIPsWithGeo, xrayAPI = xrayApi, findings = findings)
     }
 
     private fun buildFindings(

@@ -34,7 +34,8 @@ class PortScanner {
             3128, 8080, 8081, 8888
         ).distinct().sorted()
 
-        private const val HOST = "127.0.0.1"
+        private const val HOST_V4 = "127.0.0.1"
+        private const val HOST_V6 = "::1"
     }
 
     /**
@@ -45,14 +46,19 @@ class PortScanner {
         timeoutMs: Int = 300,
         onProgress: (Float) -> Unit = {}
     ): List<OpenPort> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<OpenPort>()
         val total = KNOWN_PORTS.size
-        KNOWN_PORTS.mapIndexed { index, port ->
-            async {
-                val result = probePort(port, timeoutMs)
-                onProgress((index + 1).toFloat() / total)
-                result
-            }
-        }.awaitAll().filterNotNull()
+
+        KNOWN_PORTS.forEachIndexed { idx, port ->
+            onProgress(idx.toFloat() / total)
+            // Try IPv4 first
+            val result = probePort(HOST_V4, port, timeoutMs)
+                ?: probePort(HOST_V6, port, timeoutMs) // Fallback to IPv6
+            if (result != null) results.add(result)
+        }
+
+        onProgress(1f)
+        results
     }
 
     /**
@@ -69,7 +75,10 @@ class PortScanner {
 
         (1..total).chunked(parallelism).forEachIndexed { chunkIdx, chunk ->
             val batch = chunk.map { port ->
-                async { probePort(port, timeoutMs) }
+                async {
+                    probePort(HOST_V4, port, timeoutMs)
+                        ?: probePort(HOST_V6, port, timeoutMs)
+                }
             }.awaitAll().filterNotNull()
 
             results.addAll(batch)
@@ -79,11 +88,11 @@ class PortScanner {
         results.sortedBy { it.port }
     }
 
-    private fun probePort(port: Int, timeoutMs: Int): OpenPort? {
+    private fun probePort(host: String, port: Int, timeoutMs: Int): OpenPort? {
         return try {
             val start = System.currentTimeMillis()
             Socket().use { socket ->
-                socket.connect(InetSocketAddress(HOST, port), timeoutMs)
+                socket.connect(InetSocketAddress(host, port), timeoutMs)
                 OpenPort(port, System.currentTimeMillis() - start)
             }
         } catch (_: Exception) {

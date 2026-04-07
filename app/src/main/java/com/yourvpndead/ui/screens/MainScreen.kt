@@ -150,6 +150,12 @@ fun MainScreen(viewModel: ScanViewModel) {
                     }
                 }
 
+                result.indirectSigns?.let { is_ ->
+                    item {
+                        IndirectSignsCard(is_)
+                    }
+                }
+
                 // Findings
                 if (result.findings.isNotEmpty()) {
                     item {
@@ -403,6 +409,140 @@ private fun DirectSignsCard(directSigns: DirectSignsResult) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun IndirectSignsCard(indirectSigns: IndirectSignsResult) {
+    val hasWarnings = indirectSigns.notVpnCapability.detected ||
+        indirectSigns.mtuCheck.anomalyDetected ||
+        indirectSigns.dnsCheck.detected ||
+        indirectSigns.dumpsysCheck.vpnManagementAccessible ||
+        indirectSigns.dumpsysCheck.vpnServiceAccessible
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (hasWarnings)
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+            else
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "\uD83D\uDD0E Косвенные признаки",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    if (hasWarnings) "Обнаружено" else "Чисто",
+                    color = if (hasWarnings) MaterialTheme.colorScheme.error
+                    else Color(0xFF4CAF50),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // NOT_VPN capability
+            val nv = indirectSigns.notVpnCapability
+            if (nv.error != null) {
+                CheckItem(false, "NET_CAPABILITY_NOT_VPN: ${nv.error}")
+            } else {
+                CheckItem(
+                    !nv.detected,
+                    if (nv.detected) "Capability NOT_VPN: отсутствует (VPN-сеть)"
+                    else "Capability NOT_VPN: присутствует"
+                )
+            }
+
+            // VPN interfaces from DirectSigns (reference only)
+            // Already shown in DirectSignsCard
+
+            // MTU
+            val mt = indirectSigns.mtuCheck
+            if (mt.error != null) {
+                CheckItem(false, "MTU: ${mt.error}")
+            } else if (mt.anomalyDetected) {
+                CheckItem(false, "MTU: аномалия обнаружена")
+                mt.interfaces.filter { it.isAnomaly }.forEach { iface ->
+                    Text(
+                        "    ${iface.name}: MTU ${iface.mtu} (${iface.details})",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(start = 24.dp)
+                    )
+                }
+            } else {
+                CheckItem(true, "MTU: аномалий не обнаружено")
+            }
+
+            // DNS
+            val dns = indirectSigns.dnsCheck
+            if (dns.error != null) {
+                CheckItem(false, "DNS: ${dns.error}")
+            } else if (dns.detected) {
+                CheckItem(
+                    false,
+                    "DNS в частной подсети: ${dns.privateSubnetDns.joinToString()} (может указывать на VPN-туннель)"
+                )
+            } else {
+                CheckItem(true, "DNS: публичные серверы (${dns.dnsServers.joinToString()})")
+            }
+
+            // dumpsys
+            val dmp = indirectSigns.dumpsysCheck
+            CheckItem(
+                !dmp.vpnManagementAccessible,
+                buildString {
+                    append("dumpsys vpn_management: ")
+                    if (dmp.vpnManagementAccessible) append("доступен ⚠️")
+                    else {
+                        append("недоступен")
+                        dmp.vpnManagementError?.let { append(" ($it)") }
+                    }
+                }
+            )
+            CheckItem(
+                !dmp.vpnServiceAccessible,
+                buildString {
+                    append("dumpsys activity services VpnService: ")
+                    if (dmp.vpnServiceAccessible) append("доступен ⚠️")
+                    else {
+                        append("недоступен")
+                        dmp.vpnServiceError?.let { append(" ($it)") }
+                    }
+                }
+            )
+        }
+    }
+}
+
+/** Элемент чеклиста с галочкой/предупреждением */
+@Composable
+private fun CheckItem(isOk: Boolean, text: String) {
+    Row(
+        modifier = Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            if (isOk) "✅" else "⚠️",
+            fontSize = 13.sp,
+            modifier = Modifier.padding(end = 8.dp, top = 1.dp)
+        )
+        Text(
+            text,
+            fontSize = 13.sp,
+            color = if (isOk) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.error
+        )
     }
 }
 

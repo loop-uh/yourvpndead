@@ -267,6 +267,57 @@ data class DirectSignsResult(
     val splitTunnel: SplitTunnelResult? = null
 )
 
+/** Проверка NET_CAPABILITY_NOT_VPN */
+data class NotVpnCapabilityResult(
+    val hasNotVpnCapability: Boolean = true,
+    val allCapabilities: String = "",
+    val detected: Boolean = false,
+    val error: String? = null
+)
+
+/** MTU интерфейса */
+data class MtuInterface(
+    val name: String,
+    val mtu: Int,
+    val isAnomaly: Boolean,
+    val expectedMtu: Int = 1500,
+    val details: String = ""
+)
+
+/** Результат проверки MTU */
+data class MtuCheckResult(
+    val interfaces: List<MtuInterface> = emptyList(),
+    val anomalyDetected: Boolean = false,
+    val error: String? = null
+)
+
+/** Результат проверки DNS */
+data class DnsCheckResult(
+    val dnsServers: List<String> = emptyList(),
+    val privateSubnetDns: List<String> = emptyList(),
+    val privateDnsServerName: String? = null,
+    val detected: Boolean = false,
+    val error: String? = null
+)
+
+/** Результат проверки dumpsys */
+data class DumpsysCheckResult(
+    val vpnManagementAccessible: Boolean = false,
+    val vpnManagementOutput: String? = null,
+    val vpnServiceAccessible: Boolean = false,
+    val vpnServiceOutput: String? = null,
+    val vpnManagementError: String? = null,
+    val vpnServiceError: String? = null
+)
+
+/** Полный результат косвенных признаков */
+data class IndirectSignsResult(
+    val notVpnCapability: NotVpnCapabilityResult = NotVpnCapabilityResult(),
+    val mtuCheck: MtuCheckResult = MtuCheckResult(),
+    val dnsCheck: DnsCheckResult = DnsCheckResult(),
+    val dumpsysCheck: DumpsysCheckResult = DumpsysCheckResult()
+)
+
 /** Полный результат скана */
 data class ScanResult(
     val timestamp: Long = System.currentTimeMillis(),
@@ -276,6 +327,7 @@ data class ScanResult(
     val listeningPorts: List<ListeningPort> = emptyList(),
     val vpnClientGuesses: List<VpnClientGuess> = emptyList(),
     val directSigns: DirectSignsResult? = null,
+    val indirectSigns: IndirectSignsResult? = null,
     val proxies: List<ProxyInfo> = emptyList(),
     val exitIPs: List<ExitIPInfo> = emptyList(),
     val xrayAPI: XrayAPIInfo? = null,
@@ -296,6 +348,7 @@ enum class ScanPhase(val label: String) {
     DEVICE_INFO("Сбор информации об устройстве..."),
     PROC_NET_SCAN("Анализ /proc/net/tcp..."),
     DIRECT_SIGNS("Прямые признаки VPN/прокси..."),
+    INDIRECT_SIGNS("Косвенные признаки VPN..."),
     PORT_SCAN("Сканирование портов..."),
     PROXY_PROBE("Определение типов прокси..."),
     API_DETECT("Поиск xray gRPC API..."),

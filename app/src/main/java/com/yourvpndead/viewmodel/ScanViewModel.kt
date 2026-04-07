@@ -179,6 +179,58 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            // Indirect Signs section
+            result.indirectSigns?.let { is_ ->
+                append("\n=== КОСВЕННЫЕ ПРИЗНАКИ VPN ===\n")
+
+                // NOT_VPN capability
+                append("\n--- NET_CAPABILITY_NOT_VPN ---\n")
+                val nv = is_.notVpnCapability
+                if (nv.error != null) {
+                    append("Ошибка: ${nv.error}\n")
+                } else {
+                    append("Capability NOT_VPN: ${if (nv.hasNotVpnCapability) "присутствует ✅" else "отсутствует ⚠️"}\n")
+                    append("Интерпретация: ${if (nv.detected) "Сеть определена как VPN" else "Сеть НЕ является VPN"}\n")
+                }
+
+                // MTU
+                append("\n--- MTU интерфейсов ---\n")
+                val mt = is_.mtuCheck
+                if (mt.error != null) {
+                    append("Ошибка: ${mt.error}\n")
+                } else {
+                    append("Аномалии: ${if (mt.anomalyDetected) "обнаружены ⚠️" else "не обнаружены ✅"}\n")
+                    mt.interfaces.forEach {
+                        val marker = if (it.isAnomaly) "⚠️" else "✅"
+                        append("  $marker ${it.name}: MTU ${it.mtu} — ${it.details}\n")
+                    }
+                }
+
+                // DNS
+                append("\n--- DNS серверы ---\n")
+                val dn = is_.dnsCheck
+                if (dn.error != null) {
+                    append("Ошибка: ${dn.error}\n")
+                } else {
+                    append("DNS: ${dn.dnsServers.joinToString()}\n")
+                    if (dn.privateSubnetDns.isNotEmpty()) {
+                        append("В частной подсети: ${dn.privateSubnetDns.joinToString()} ⚠️\n")
+                        append("Может указывать на VPN-туннель или локальный резолвер\n")
+                    }
+                    dn.privateDnsServerName?.let { append("Private DNS (DoT): $it\n") }
+                }
+
+                // dumpsys
+                append("\n--- dumpsys ---\n")
+                val dm = is_.dumpsysCheck
+                append("vpn_management: ${if (dm.vpnManagementAccessible) "доступен ⚠️" else "недоступен ✅"}")
+                dm.vpnManagementError?.let { append(" ($it)") }
+                append("\n")
+                append("activity services VpnService: ${if (dm.vpnServiceAccessible) "доступен ⚠️" else "недоступен ✅"}")
+                dm.vpnServiceError?.let { append(" ($it)") }
+                append("\n")
+            }
+
             if (result.proxies.isNotEmpty()) {
                 appendLine("── Proxies Found ──")
                 result.proxies.forEach { proxy ->
