@@ -1,4 +1,4 @@
-name: Build APK
+name: Build & Release APK
 
 on:
   push:
@@ -10,10 +10,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -32,17 +36,51 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug
 
-      - name: Upload Debug APK
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+
+      - name: Get version info
+        id: version
+        run: |
+          echo "date=$(date +'%Y.%m.%d')" >> $GITHUB_OUTPUT
+          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "count=$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Rename APKs
+        run: |
+          mkdir -p release-apks
+          cp app/build/outputs/apk/debug/app-debug.apk release-apks/YourVPNDead-v${{ steps.version.outputs.count }}-debug.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk release-apks/YourVPNDead-v${{ steps.version.outputs.count }}-release.apk
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ steps.version.outputs.count }}
+          name: "YourVPNDead v${{ steps.version.outputs.count }} (${{ steps.version.outputs.date }})"
+          body: |
+            ## Автоматический билд
+
+            **Дата:** ${{ steps.version.outputs.date }}
+            **Коммит:** [`${{ steps.version.outputs.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+
+            ### Изменения
+            ${{ github.event.head_commit.message }}
+
+            ---
+            Скачайте `YourVPNDead-v${{ steps.version.outputs.count }}-debug.apk` и установите на Android.
+          artifacts: "release-apks/*.apk"
+          makeLatest: true
+          allowUpdates: true
+
+      - name: Upload Debug APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: yourvpndead-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease
-
-      - name: Upload Release APK
+      - name: Upload Release APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: yourvpndead-release
